@@ -2,8 +2,6 @@
   <h1 align="center">Omnidirectional Dynamic Gaussian Splatting (ODGS) - SSIM-Based Adaptive Densification</h1>
 </p>
 
-
----
 This project is an improvement of ["ODGS: 3D Scene Reconstruction from Omnidirectional Images with 3D Gaussian Splatting."](https://arxiv.org/abs/2410.20686)
 
 ---
@@ -85,7 +83,7 @@ self.densify_and_prune(ssim_error_per_gaussian)
 ```
 ---
 
-## **📌 Credits & Original Work**
+## **Credits & Original Work**
 This project is based on the original work by **Inria GRAPHDECO Research Group**.
 Official Repository: [Original GitHub Repository](https://github.com/esw0116/ODGS) 
 
@@ -93,6 +91,6 @@ The improvements in this project introduce **SSIM-based Adaptive Densification**
 
 ---
 
-## **📌 Contributors**
+## **Contributors**
 - **Dhruv Bhalodia**
 - **Supervisor: Dr. Deepika Gupta**  
