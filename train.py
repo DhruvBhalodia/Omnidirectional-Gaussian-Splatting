@@ -12,6 +12,7 @@
 import os
 import torch
 import random
+import torch.nn.functional as F
 from utils.loss_utils import l1_loss, ssim, est_wsmap
 from gaussian_renderer import render, network_gui
 import sys
@@ -78,10 +79,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
+        ssim_map = ssim(image, gt_image, return_map=True)  
+        ssim_error = 1.0 - ssim_map  # Convert SSIM into an error map
+
+        # Compute final loss
         Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
-        
+        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * torch.mean(ssim_error)
         loss.backward()
+
+        # Map SSIM error to Gaussians
+        ssim_error_per_gaussian = map_ssim_to_gaussians(ssim_error, gaussians.get_xyz, viewpoint_cam)
+
         iter_end.record()
         cvt = time.time()
         time_record = time_record + (cvt-pvt)
@@ -123,7 +131,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold_min, opt.densify_grad_threshold_max, 0.005, scene.cameras_extent+100, size_threshold, lat)
+                    gaussians.densify_and_prune(ssim_error_per_gaussian, 0.005, scene.cameras_extent + 100, size_threshold, lat)
             
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
@@ -143,6 +151,53 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if check_100m == 0:
             break
 
+
+def project_gaussians_to_2D(gaussians_xyz, viewpoint_camera):
+    # Get the view-projection matrix from the camera
+    view_proj_matrix = viewpoint_camera.view_projection_matrix  # Shape: [4, 4]
+    
+    # Convert 3D points to homogeneous coordinates (N, 4)
+    ones = torch.ones((gaussians_xyz.shape[0], 1), device=gaussians_xyz.device)
+    gaussians_homogeneous = torch.cat([gaussians_xyz, ones], dim=-1)  # Shape: [N, 4]
+    
+    # Apply the view-projection transformation
+    projected = torch.matmul(gaussians_homogeneous, view_proj_matrix.t())  # Shape: [N, 4]
+    
+    # Normalize by the w component to get 2D coordinates
+    projected_2D = projected[:, :2] / projected[:, 3:4]  # Shape: [N, 2]
+    
+    return projected_2D
+
+def map_ssim_to_gaussians(ssim_error, gaussians_xyz, viewpoint_camera):
+    # Project 3D Gaussian positions to 2D normalized coordinates (range: [-1, 1])
+    projected_2D = project_gaussians_to_2D(gaussians_xyz, viewpoint_camera)  # Shape: [N, 2]
+    
+    # Get the height and width of the SSIM error map
+    H, W = ssim_error.shape[-2:]
+    
+    # Convert normalized coordinates to pixel coordinates
+    projected_2D_pixel = projected_2D.clone()
+    projected_2D_pixel[:, 0] = (projected_2D[:, 0] + 1) * (W - 1) / 2.0
+    projected_2D_pixel[:, 1] = (projected_2D[:, 1] + 1) * (H - 1) / 2.0
+    
+    # Normalize pixel coordinates back to [-1, 1] (required for grid_sample)
+    norm_x = (projected_2D_pixel[:, 0] / (W - 1)) * 2 - 1
+    norm_y = (projected_2D_pixel[:, 1] / (H - 1)) * 2 - 1
+    grid = torch.stack((norm_x, norm_y), dim=-1)  # Shape: [N, 2]
+    
+    # Reshape grid to [1, N, 1, 2] for grid_sample
+    grid = grid.unsqueeze(0).unsqueeze(2)
+    
+    # Prepare the SSIM error map with shape [1, 1, H, W]
+    ssim_error = ssim_error.unsqueeze(0).unsqueeze(0)
+    
+    # Sample the SSIM error map at the Gaussian positions using bilinear interpolation
+    ssim_error_per_gaussian = F.grid_sample(ssim_error, grid, mode='bilinear', align_corners=True)
+    
+    # Remove extra dimensions to obtain a tensor of shape [N]
+    ssim_error_per_gaussian = ssim_error_per_gaussian.squeeze()
+    
+    return ssim_error_per_gaussian
 
 def prepare_output_and_logger(args):    
     if not args.model_path:

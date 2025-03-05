@@ -360,60 +360,48 @@ class GaussianModel:
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
-    def densify_and_split(self, grads, grad_threshold_min, grad_threshold_max, scene_extent, lat, N=2):
-        n_init_points = self.get_xyz.shape[0]
-        # Extract points that satisfy the gradient condition
-        padded_grad = torch.zeros((n_init_points), device="cuda")
-        padded_grad[:grads.shape[0]] = grads.squeeze()
-        
-        cos_lat = torch.cos(lat)
-        padded_dynamic_grad_threshold = torch.zeros((n_init_points), device="cuda")
-        dynamic_grad_threshold = (1-cos_lat) * (grad_threshold_max - grad_threshold_min) + grad_threshold_min
-        padded_dynamic_grad_threshold[:grads.shape[0]] = dynamic_grad_threshold.squeeze()
-        selected_pts_mask = torch.where(padded_grad >= padded_dynamic_grad_threshold, True, False)
-        selected_pts_mask = torch.logical_and(selected_pts_mask,
-                                              torch.max(self.get_scaling, dim=1).values > self.percent_dense*scene_extent)
-
-        stds = self.get_scaling[selected_pts_mask].repeat(N,1)
-        means =torch.zeros((stds.size(0), 3),device="cuda")
-        samples = torch.normal(mean=means, std=stds)
-        rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N,1,1)
-        new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[selected_pts_mask].repeat(N, 1)
-        new_scaling = self.scaling_inverse_activation(self.get_scaling[selected_pts_mask].repeat(N,1) / (0.8*N))
-        new_rotation = self._rotation[selected_pts_mask].repeat(N,1)
-        new_features_dc = self._features_dc[selected_pts_mask].repeat(N,1,1)
-        new_features_rest = self._features_rest[selected_pts_mask].repeat(N,1,1)
-        new_opacity = self._opacity[selected_pts_mask].repeat(N,1)
-
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation)
-        prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
-        self.prune_points(prune_filter)
-
-
-    def densify_and_clone(self, grads, grad_threshold_min, grad_threshold_max, scene_extent, lat):
-        # Extract points that satisfy the gradient condition
-        cos_lat = torch.cos(lat)
-        dynamic_grad_threshold = (1-cos_lat) * (grad_threshold_max - grad_threshold_min) + grad_threshold_min
-        selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= dynamic_grad_threshold, True, False)
-        selected_pts_mask = torch.logical_and(selected_pts_mask,
-                                              torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
-        
+    def densify_and_clone(self, selected_pts_mask, scene_extent, lat):
         new_xyz = self._xyz[selected_pts_mask]
         new_features_dc = self._features_dc[selected_pts_mask]
         new_features_rest = self._features_rest[selected_pts_mask]
         new_opacities = self._opacity[selected_pts_mask]
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
-
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
 
-    def densify_and_prune(self, min_grad, max_grad, min_opacity, extent, max_screen_size, lat):
-        grads = self.xyz_gradient_accum / self.denom
-        grads[grads.isnan()] = 0.0
+    # Updated densify_and_split: now accepts a boolean mask (selected_pts_mask)
+    def densify_and_split(self, selected_pts_mask, scene_extent, lat, N=2):
+        n_init_points = self.get_xyz.shape[0]
+        # Use the boolean mask directly to select points for splitting
+        stds = self.get_scaling[selected_pts_mask].repeat(N, 1)
+        means = torch.zeros((stds.size(0), 3), device="cuda")
+        samples = torch.normal(mean=means, std=stds)
+        rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N, 1, 1)
+        new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[selected_pts_mask].repeat(N, 1)
+        new_scaling = self.scaling_inverse_activation(self.get_scaling[selected_pts_mask].repeat(N, 1) / (0.8 * N))
+        new_rotation = self._rotation[selected_pts_mask].repeat(N, 1)
+        new_features_dc = self._features_dc[selected_pts_mask].repeat(N, 1, 1)
+        new_features_rest = self._features_rest[selected_pts_mask].repeat(N, 1, 1)
+        new_opacity = self._opacity[selected_pts_mask].repeat(N, 1)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation)
+        prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=torch.bool)))
+        self.prune_points(prune_filter)
 
-        self.densify_and_clone(grads, min_grad, max_grad, extent, lat)
-        self.densify_and_split(grads, min_grad, max_grad, extent, lat)
+    # Updated densify_and_prune: now uses SSIM error per Gaussian instead of gradients
+    def densify_and_prune(self, ssim_error_per_gaussian, min_opacity, extent, max_screen_size, lat):
+        # Clean SSIM error tensor
+        ssim_error = ssim_error_per_gaussian.clone()
+        ssim_error[ssim_error.isnan()] = 0.0
 
+        # Adaptive threshold based on mean SSIM error
+        threshold = torch.mean(ssim_error)
+        selected_pts_mask = ssim_error > threshold
+
+        # Densification: clone and split using the selected mask
+        self.densify_and_clone(selected_pts_mask, extent, lat)
+        self.densify_and_split(selected_pts_mask, extent, lat)
+
+        # Pruning: remove Gaussians with opacity below threshold or with too large screen size
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         if max_screen_size:
             big_points_vs = self.max_radii2D > max_screen_size
