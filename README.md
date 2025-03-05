@@ -1,60 +1,33 @@
-<div align="center">
-
-[![Project](https://img.shields.io/badge/Project-ODGS-green)](https://robot0321.github.io/odgs/index.html)
-[![ArXiv](https://img.shields.io/badge/Arxiv-2410.20686-red)](https://arxiv.org/abs/2410.20686)
-[![SlidesLive](https://img.shields.io/badge/SlidesLive-Video-blue)](https://recorder-v3.slideslive.com/#/share?share=95518&s=8f3c36ff-7c37-4acd-92da-9f473575a26e)
-
-</div>
-
-
 <p align="center">
-  <h1 align="center">ODGS: 3D Scene Reconstruction from Omnidirectional Images <br> with 3D Gaussian Splatting</h1>
-  <p align="center">
-    <a href="https://esw0116.github.io/">Suyoung Lee</a>*
-    &nbsp;·&nbsp;
-    <a href="https://robot0321.github.io/">Jaeyoung Chung</a>*
-    &nbsp;·&nbsp;
-    Jaeyoo Huh
-    &nbsp;·&nbsp;
-    <a href="https://cv.snu.ac.kr/index.php/~kmlee/">Kyoung Mu Lee</a>
-    </br>
-    (* denotes equal contribution)
-  </p>
-  <h3 align="center">NeurIPS 2024</h3>
-
+  <h1 align="center">Omnidirectional Dynamic Gaussian Splatting (ODGS) - SSIM-Based Adaptive Densification</h1>
 </p>
 
-
-<!-- <div align="center">
-
-[![ArXiv]()]()
-[![Github](https://img.shields.io/github/stars/luciddreamer-cvlab/LucidDreamer)](https://github.com/luciddreamer-cvlab/LucidDreamer)
-[![LICENSE](https://img.shields.io/badge/license-MIT-lightgrey)](https://github.com/luciddreamer-cvlab/LucidDreamer/blob/master/LICENSE)
-
-</div> -->
-
-
-<p align="center">
-    <img src="assets/logo_cvlab.png" height=60>
-</p>
 
 ---
-This is an official implementation of ["ODGS: 3D Scene Reconstruction from Omnidirectional Images with 3D Gaussian Splatting."](https://arxiv.org/abs/2410.20686)
+This project is an improvement of ["ODGS: 3D Scene Reconstruction from Omnidirectional Images with 3D Gaussian Splatting."](https://arxiv.org/abs/2410.20686)
 
-<p align="center">
-    <img src="assets/method_coord.png" height=400>
-</p>
+---
 
+## **📌 Project Overview**
+This project improves **Omnidirectional Dynamic Gaussian Splatting (ODGS)** by introducing **SSIM-based Adaptive Densification**. Instead of using gradients to decide where to add new Gaussians, we now use **SSIM (Structural Similarity Index)** error maps to focus densification in **blurry or missing detail areas**, resulting in **higher-quality 3D reconstruction**.
 
-### Update Log
-**24.12.08:**  First upload (CUDA rasterizer and training code)  
-**24.12.26:**  Update project page and video hyperlink
+---
 
+## **What Has Been Done?**
+### **Original Method (Before Improvement)**
+- Used **gradient-based densification** to add Gaussians where gradients were high.
+- This method was **not directly related to image quality** and sometimes added unnecessary Gaussians.
+  
+### **Improvements (After Modification)**
+- **SSIM-based Adaptive Densification** replaces gradient-based densification.
+- Gaussians are now added where **SSIM error is high**, ensuring sharper edges and better details.
+- **Faster convergence** and **higher quality** 3D reconstructions.
+
+---
 
 ## Installation
 ~~~bash
-git clone https://github.com/esw0116/ODGS.git --recursive
-cd ODGS
+git clone https://github.com/DhruvBhalodia/Omnidirectional-Gaussian-Splatting.git
 
 # Set Environment
 conda env create --file environment.yaml
@@ -64,12 +37,9 @@ pip install submodules/odgs-gaussian-rasterization
 ~~~
 
 ## Dataset
-We evaluate 6 datasets by adjusting their resolutions and performing Structure-from-Motion using OpenMVG.  
-For your convenience, we provide :star:[**links to the adjusted datasets**](https://drive.google.com/drive/folders/1xLdy0Zh6K1vAN_WpTWg4RTTUPxxv8RFp?usp=sharing):star: used in our paper.  
-**Note**: The authors of 360Roam dataset do not want to distribute thier datasets yet (8 Dec. 2024), so we will not provide here. If you need, please contact them.
+The dataset used in this project can be found at the following link:  
+[ODGS Dataset](https://drive.google.com/drive/folders/1xLdy0Zh6K1vAN_WpTWg4RTTUPxxv8RFp?usp=sharing)
 
-For reference, we provide the links to the **original datasets** here.  
-[OmniBlender & Ricoh360](https://github.com/changwoonchoi/EgoNeRF) / [OmniPhotos](https://github.com/cr333/OmniPhotos?tab=readme-ov-file) / [360Roam](https://huajianup.github.io/research/360Roam/) / [OmniScenes](https://github.com/82magnolia/piccolo) / [360VO](https://huajianup.github.io/research/360VO/)  
 
 ## Training (Optimization)
 ODGS requires optimization for each scene. Run the script below to start optimization:
@@ -77,21 +47,52 @@ ODGS requires optimization for each scene. Run the script below to start optimiz
 python train.py -s <source(dataset)_path> -m <output_path> --eval
 ~~~
 
-<section class="section" id="BibTeX">
-  <div class="container is-max-desktop content">
-    <h2 class="title">Citation</h2>
-    <pre><code>@article{lee2024odgs,
-      title={ODGS: 3D Scene Reconstruction from Omnidirectional Images with 3D Gaussian Splattings},
-      author={Lee, Suyoung and Chung, Jaeyoung and Huh, Jaeyoo and Lee, Kyoung Mu},
-      journal={Advances in Neural Information Processing Systems (NeurIPS)},
-      volume={37},
-      year={2024}
-}</code></pre>
-  </div>
-</section>
+### Rendering a Scene
+To render images from trained Gaussians:
+```bash
+python render.py --model_path <output_model_path> --iteration <iteration_number>
+```
 
-## Qualitative Comparisons
+### Visualizing 3D Scene
+To export Gaussians as a `.ply` file for 3D visualization:
+```bash
+python export_ply.py --model_path <output_model_path> --iteration <iteration_number>
+```
 
-<p align="center">
-    <img src="assets/qual_v.png" width=800>
-</p>
+---
+
+## How the New Densification Works
+### **Step 1: Compute SSIM error map**
+```python
+ssim_map = ssim(image, gt_image, return_map=True)
+ssim_error = 1.0 - ssim_map  # Convert SSIM to an error map
+```
+
+### **Step 2: Map 2D SSIM errors to 3D Gaussians**
+```python
+ssim_error_per_gaussian = map_ssim_to_gaussians(ssim_error, gaussians.get_xyz, viewpoint_cam)
+```
+
+### **Step 3: Use SSIM error instead of gradients to decide where to add Gaussians**
+```python
+threshold = torch.mean(ssim_error_per_gaussian)
+selected_pts_mask = ssim_error_per_gaussian > threshold  # Only add Gaussians in high-error areas
+```
+
+### **Step 4: Modify `densify_and_prune()` to use SSIM errors**
+```python
+self.densify_and_prune(ssim_error_per_gaussian)
+```
+---
+
+## **📌 Credits & Original Work**
+This project is based on the original work by **Inria GRAPHDECO Research Group**.
+Official Repository: [Original GitHub Repository](https://github.com/esw0116/ODGS) 
+
+The improvements in this project introduce **SSIM-based Adaptive Densification**, replacing the original gradient-based densification method.
+
+---
+
+## **📌 Contributors**
+- **Dhruv Bhalodia**
+- **Supervisor: Dr. Deepika Gupta**  
